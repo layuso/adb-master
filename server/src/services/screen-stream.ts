@@ -5,7 +5,9 @@ import { logger } from '../utils/logger';
 
 const PNG_MAGIC = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_FRAME_BYTES = 20 * 1024 * 1024;
-const CAPTURE_INTERVAL_MS = 5000;
+export type CaptureMode = 'manual' | 'eink' | 'standard';
+const EINK_INTERVAL_MS = 5000;
+const CAPTURE_INTERVAL_MIN_MS = 67;
 const CAPTURE_TIMEOUT_MS = 15000;
 
 /**
@@ -18,11 +20,22 @@ export class ScreenStream extends EventEmitter {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private timeout: ReturnType<typeof setTimeout> | null = null;
   private running = false;
+  private mode: CaptureMode = 'eink';
+  private intervalMs = EINK_INTERVAL_MS;
+  private serial = '';
 
-  start(serial: string, _fps = 1): void {
+  start(serial: string, mode: CaptureMode = 'eink', fps = 1): void {
     if (this.running) return;
+    this.serial = serial;
+    this.mode = mode;
+    this.intervalMs = mode === 'eink' ? EINK_INTERVAL_MS : Math.max(CAPTURE_INTERVAL_MIN_MS, Math.ceil(1000 / Math.max(1, Math.min(15, fps))));
     this.running = true;
     this.capture(serial);
+  }
+
+  refresh(): void {
+    if (!this.running || this.mode !== 'manual' || this.proc) return;
+    this.capture(this.serial);
   }
 
   private capture(serial: string): void {
@@ -57,9 +70,9 @@ export class ScreenStream extends EventEmitter {
       } else {
         logger.warn(`Screen capture exited with code ${code} for ${serial}`);
       }
-      // From start to start, allow at most one capture every 5 seconds.
-      if (this.running) {
-        const delay = Math.max(0, CAPTURE_INTERVAL_MS - (Date.now() - startedAt));
+      // Serialized capture: never overlap, even when capture takes longer than target FPS.
+      if (this.running && this.mode !== 'manual') {
+        const delay = Math.max(0, this.intervalMs - (Date.now() - startedAt));
         this.timer = setTimeout(() => { this.timer = null; this.capture(serial); }, delay);
       }
     };

@@ -22,7 +22,7 @@ COPY server/package.json server/package-lock.json* ./server/
 COPY tsconfig.base.json ./
 COPY server/tsconfig.json ./server/
 
-RUN cd server && npm install
+RUN cd server && npm install --include=dev
 
 COPY server/src ./server/src
 

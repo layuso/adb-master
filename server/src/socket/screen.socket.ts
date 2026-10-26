@@ -2,7 +2,7 @@ import { Namespace } from 'socket.io';
 import sharp from 'sharp';
 import { logger } from '../utils/logger';
 import { inputService } from '../services/input.service';
-import { ScreenStream } from '../services/screen-stream';
+import { ScreenStream, CaptureMode } from '../services/screen-stream';
 
 export function setupScreenSocket(nsp: Namespace): void {
   // One preview owner per Android device (not per browser tab).
@@ -25,16 +25,20 @@ export function setupScreenSocket(nsp: Namespace): void {
       activeSerial = null;
     };
 
-    socket.on('screen:start', (data: { serial: string; fps?: number; quality?: number; scale?: number }) => {
+    socket.on('screen:start', (data: { serial: string; fps?: number; quality?: number; scale?: number; mode?: CaptureMode }) => {
       stopStream();
-      const { serial, fps = 1, quality = 70, scale = 100 } = data;
+      const { serial, fps = 1, quality = 70, scale = 100, mode = 'eink' } = data;
+      if (!['manual', 'eink', 'standard'].includes(mode)) {
+        socket.emit('screen:error', { message: 'Invalid capture mode' });
+        return;
+      }
       if (!serial || (deviceOwners.has(serial) && deviceOwners.get(serial) !== socket.id)) {
         socket.emit('screen:error', { message: 'Preview is already in use for this device' });
         return;
       }
       deviceOwners.set(serial, socket.id);
       activeSerial = serial;
-      const minInterval = 5000;
+      const minInterval = mode === 'eink' ? 5000 : mode === 'manual' ? 0 : Math.ceil(1000 / Math.max(1, Math.min(15, fps)));
       streaming = true;
 
       const stream = new ScreenStream();
@@ -113,7 +117,7 @@ export function setupScreenSocket(nsp: Namespace): void {
         }
       });
 
-      stream.start(serial, fps);
+      stream.start(serial, mode, fps);
     });
 
     // Input via socket — lower latency than REST for interactive use.
@@ -174,6 +178,10 @@ export function setupScreenSocket(nsp: Namespace): void {
       } catch (err: any) {
         socket.emit('input:error', { message: err.message });
       }
+    });
+
+    socket.on('screen:refresh', () => {
+      if (streaming) currentStream?.refresh();
     });
 
     socket.on('screen:stop', () => {

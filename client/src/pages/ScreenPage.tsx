@@ -6,7 +6,8 @@ import { Button } from '../components/common/Button';
 import { showToast } from '../components/common/Toast';
 import './ScreenPage.css';
 
-const FPS_OPTIONS = [1, 3, 5, 10, 15];
+// Legacy e-ink devices cannot safely sustain live capture. One frame / 5 sec max.
+const FPS_OPTIONS = [1];
 const QUALITY_OPTIONS = [30, 50, 70, 90];
 const SCALE_OPTIONS = [25, 50, 75, 100];
 
@@ -32,7 +33,7 @@ export const ScreenPage: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderingRef = useRef(false);
   const [streaming, setStreaming] = useState(false);
-  const [fps, setFps] = useState(5);
+  const [fps, setFps] = useState(1);
   const [quality, setQuality] = useState(70);
   const [scale, setScale] = useState(100);
   const [frameCount, setFrameCount] = useState(0);

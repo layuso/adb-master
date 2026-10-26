@@ -6,8 +6,8 @@ import { Button } from '../components/common/Button';
 import { showToast } from '../components/common/Toast';
 import './ScreenPage.css';
 
-// Legacy e-ink devices cannot safely sustain live capture. One frame / 5 sec max.
-const FPS_OPTIONS = [1];
+const FPS_OPTIONS = [1, 3, 5, 10, 15];
+type CaptureMode = 'manual' | 'eink' | 'standard';
 const QUALITY_OPTIONS = [30, 50, 70, 90];
 const SCALE_OPTIONS = [25, 50, 75, 100];
 
@@ -34,6 +34,7 @@ export const ScreenPage: React.FC = () => {
   const renderingRef = useRef(false);
   const [streaming, setStreaming] = useState(false);
   const [fps, setFps] = useState(1);
+  const [captureMode, setCaptureMode] = useState<CaptureMode>('eink');
   const [quality, setQuality] = useState(70);
   const [scale, setScale] = useState(100);
   const [frameCount, setFrameCount] = useState(0);
@@ -103,7 +104,7 @@ export const ScreenPage: React.FC = () => {
     setFrameCount(0);
     setActualFps(0);
     fpsCounterRef.current = { count: 0, lastTime: Date.now() };
-    screenSocket.emit('screen:start', { serial, fps, quality, scale });
+    screenSocket.emit('screen:start', { serial, fps, quality, scale, mode: captureMode });
     setStreaming(true);
   };
 
@@ -112,15 +113,21 @@ export const ScreenPage: React.FC = () => {
     setStreaming(false);
   };
 
-  const restartStream = (opts: { fps?: number; quality?: number; scale?: number }) => {
+  const restartStream = (opts: { fps?: number; quality?: number; scale?: number; mode?: CaptureMode }) => {
     if (streaming && serial) {
       screenSocket.emit('screen:start', {
         serial,
         fps: opts.fps ?? fps,
         quality: opts.quality ?? quality,
         scale: opts.scale ?? scale,
+        mode: opts.mode ?? captureMode,
       });
     }
+  };
+
+  const handleCaptureModeChange = (mode: CaptureMode) => {
+    setCaptureMode(mode);
+    restartStream({ mode });
   };
 
   const handleFpsChange = (newFps: number) => {
@@ -223,6 +230,14 @@ export const ScreenPage: React.FC = () => {
 
       <div className="screen-toolbar">
         <div className="screen-fps-group">
+          <span className="screen-fps-label">Capture:</span>
+          {(['manual', 'eink', 'standard'] as CaptureMode[]).map((mode) => (
+            <button key={mode} className={`screen-fps-btn${captureMode === mode ? ' active' : ''}`} onClick={() => handleCaptureModeChange(mode)}>
+              {mode === 'eink' ? 'E-ink (0.2 FPS)' : mode === 'manual' ? 'Manual' : 'Standard'}
+            </button>
+          ))}
+        </div>
+        {captureMode === 'standard' && <div className="screen-fps-group">
           <span className="screen-fps-label">{t('screen.fps')}:</span>
           {FPS_OPTIONS.map((f) => (
             <button
@@ -233,7 +248,7 @@ export const ScreenPage: React.FC = () => {
               {f}
             </button>
           ))}
-        </div>
+        </div>}
 
         <div className="screen-fps-group">
           <span className="screen-fps-label">{t('screen.quality')}:</span>
@@ -269,6 +284,9 @@ export const ScreenPage: React.FC = () => {
           )}
         </div>
 
+        {streaming && captureMode === 'manual' && (
+          <Button onClick={() => screenSocket.emit('screen:refresh')}>Refresh frame</Button>
+        )}
         {streaming && (
           <div className="screen-stats">
             <span className="screen-stat mono">{frameCount} {t('screen.frames')}</span>

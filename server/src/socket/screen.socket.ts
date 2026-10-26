@@ -5,10 +5,13 @@ import { inputService } from '../services/input.service';
 import { ScreenStream } from '../services/screen-stream';
 
 export function setupScreenSocket(nsp: Namespace): void {
+  // One preview owner per Android device (not per browser tab).
+  const deviceOwners = new Map<string, string>();
   nsp.on('connection', (socket) => {
     logger.info(`Screen socket connected: ${socket.id}`);
     let streaming = false;
     let currentStream: ScreenStream | null = null;
+    let activeSerial: string | null = null;
 
     const stopStream = () => {
       streaming = false;
@@ -16,12 +19,22 @@ export function setupScreenSocket(nsp: Namespace): void {
         currentStream.stop();
         currentStream = null;
       }
+      if (activeSerial && deviceOwners.get(activeSerial) === socket.id) {
+        deviceOwners.delete(activeSerial);
+      }
+      activeSerial = null;
     };
 
     socket.on('screen:start', (data: { serial: string; fps?: number; quality?: number; scale?: number }) => {
       stopStream();
-      const { serial, fps = 5, quality = 70, scale = 100 } = data;
-      const minInterval = Math.max(33, Math.round(1000 / Math.min(fps, 30)));
+      const { serial, fps = 1, quality = 70, scale = 100 } = data;
+      if (!serial || (deviceOwners.has(serial) && deviceOwners.get(serial) !== socket.id)) {
+        socket.emit('screen:error', { message: 'Preview is already in use for this device' });
+        return;
+      }
+      deviceOwners.set(serial, socket.id);
+      activeSerial = serial;
+      const minInterval = 5000;
       streaming = true;
 
       const stream = new ScreenStream();

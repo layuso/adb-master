@@ -8,7 +8,11 @@ const MAX_FRAME_BYTES = 20 * 1024 * 1024;
 export type CaptureMode = 'manual' | 'eink' | 'standard';
 const EINK_INTERVAL_MS = 5000;
 const CAPTURE_INTERVAL_MIN_MS = 67;
-const CAPTURE_TIMEOUT_MS = 15000;
+// Configurable timeout for legacy devices; default 45 seconds, capped at 5 minutes.
+const parsedTimeoutMs = Number(process.env.ADB_SCREEN_CAPTURE_TIMEOUT_MS ?? '45000');
+const CAPTURE_TIMEOUT_MS = Number.isFinite(parsedTimeoutMs)
+  ? Math.max(1000, Math.min(300000, parsedTimeoutMs))
+  : 45000;
 
 /**
  * E-ink-safe screen capture. Executes one screenshot per capture.
@@ -54,8 +58,9 @@ export class ScreenStream extends EventEmitter {
       this.timeout = null;
       this.proc = null;
       if (!this.running) return;
+      const elapsedMs = Date.now() - startedAt;
       if (error) {
-        logger.warn(`Screen capture failed for ${serial}: ${error.message}`);
+        logger.warn(`Screen capture failed for ${serial} after ${elapsedMs}ms (${size} bytes): ${error.message}`);
         this.running = false;
         this.emit('error', error);
         return;
@@ -63,12 +68,19 @@ export class ScreenStream extends EventEmitter {
       if (code === 0) {
         const png = Buffer.concat(chunks);
         if (png.subarray(0, 8).equals(PNG_MAGIC)) {
+          logger.info(`Screen capture complete for ${serial}: ${elapsedMs}ms, ${size} bytes`);
           this.emit('frame', png);
         } else {
-          logger.warn(`Screen capture returned invalid PNG for ${serial}`);
+          logger.warn(`Screen capture invalid PNG for ${serial}: ${elapsedMs}ms, ${size} bytes`);
+          this.running = false;
+          this.emit('error', new Error('Screen capture returned invalid PNG'));
+          return;
         }
       } else {
-        logger.warn(`Screen capture exited with code ${code} for ${serial}`);
+        logger.warn(`Screen capture exited with code ${code} for ${serial} after ${elapsedMs}ms (${size} bytes)`);
+        this.running = false;
+        this.emit('error', new Error(`Screen capture exited with code ${code}`));
+        return;
       }
       // Serialized capture: never overlap, even when capture takes longer than target FPS.
       if (this.running && this.mode !== 'manual') {
@@ -91,7 +103,7 @@ export class ScreenStream extends EventEmitter {
     proc.on('close', (code) => done(code));
     this.timeout = setTimeout(() => {
       proc.kill('SIGKILL');
-      done(null, new Error('Screen capture timed out after 15 seconds'));
+      done(null, new Error(`Screen capture timed out after ${CAPTURE_TIMEOUT_MS}ms (${size} bytes received)`));
     }, CAPTURE_TIMEOUT_MS);
   }
 
